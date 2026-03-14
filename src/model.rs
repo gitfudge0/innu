@@ -74,6 +74,7 @@ pub enum WifiCommand {
     Refresh,
     Connect(ConnectRequest),
     Disconnect,
+    Forget(String),
     Shutdown,
 }
 

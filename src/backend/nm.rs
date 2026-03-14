@@ -42,7 +42,7 @@ impl BackendController {
         let (event_tx, event_rx) = mpsc::channel();
 
         thread::Builder::new()
-            .name("inno-networkmanager".into())
+            .name("innu-networkmanager".into())
             .spawn(move || {
                 if let Err(error) = backend_thread(command_rx, event_tx) {
                     error!(?error, "backend thread exited");
@@ -253,6 +253,17 @@ impl BackendWorker {
                     .ok();
                 Ok(())
             }
+            WifiCommand::Forget(ssid) => {
+                self.event_tx
+                    .send(WifiEvent::OperationStarted(format!("Forgetting {ssid}")))
+                    .ok();
+                self.manager.forget(&ssid).await?;
+                self.clear_error();
+                self.event_tx
+                    .send(WifiEvent::OperationFinished(format!("Forgot {ssid}")))
+                    .ok();
+                Ok(())
+            }
             WifiCommand::Shutdown => Ok(()),
         }
     }
@@ -360,6 +371,9 @@ fn humanize_nm_error(error: &anyhow::Error) -> String {
                 "The selected network is no longer visible. Refresh and try again.".into()
             }
             ConnectionError::Timeout => "NetworkManager timed out while trying to connect.".into(),
+            ConnectionError::NoSavedConnection => {
+                "No saved profile exists for this network.".into()
+            }
             other => other.to_string(),
         }
     } else {

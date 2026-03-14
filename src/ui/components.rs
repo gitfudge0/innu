@@ -1,6 +1,6 @@
 use eframe::egui::{
-    self, Align, Button, Color32, FontFamily, Frame, Layout, Margin, Response, RichText, Stroke,
-    TextEdit, Ui, Vec2,
+    self, Align, Button, Color32, CursorIcon, FontFamily, Frame, Layout, Margin, Response,
+    RichText, Stroke, TextEdit, Ui, Vec2,
 };
 
 use crate::ui::theme::{BaseMode, LayoutClass, ThemeTokens};
@@ -39,6 +39,7 @@ pub enum AppIcon {
     Retry,
     Close,
     Confirm,
+    Forget,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,6 +56,7 @@ pub enum AppActionKind {
     Dismiss,
     Cancel,
     ConfirmConnect,
+    Forget,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -128,7 +130,9 @@ pub fn theme_toggle_button(
             theme_toggle_height(layout),
         )),
     );
-    response.on_hover_text(theme_toggle_tooltip(target_mode))
+    response
+        .on_hover_cursor(CursorIcon::PointingHand)
+        .on_hover_text(theme_toggle_tooltip(target_mode))
 }
 
 pub fn primary_button(
@@ -292,7 +296,13 @@ pub fn network_row<R>(
         NetworkRowState::Unsupported => Color32::TRANSPARENT,
     };
 
-    Frame::new()
+    let hover_fill = match state {
+        NetworkRowState::Default => tokens.colors.hover_bg,
+        NetworkRowState::InUse => tokens.colors.hover_bg,
+        NetworkRowState::Unsupported => tokens.colors.hover_bg,
+    };
+
+    let mut response = Frame::new()
         .fill(fill)
         .inner_margin(Margin::symmetric(
             0,
@@ -302,7 +312,23 @@ pub fn network_row<R>(
                 LayoutClass::Compact => 2,
             },
         ))
-        .show(ui, add_contents)
+        .show(ui, add_contents);
+
+    response.response = response.response.interact(egui::Sense::click());
+    response.response = response.response.on_hover_cursor(CursorIcon::PointingHand);
+
+    if response.response.hovered() {
+        ui.painter()
+            .rect_filled(response.response.rect, 0, hover_fill.gamma_multiply(0.18));
+        ui.painter().rect_stroke(
+            response.response.rect,
+            0,
+            Stroke::new(tokens.strokes.standard, tokens.colors.focus_border),
+            egui::StrokeKind::Outside,
+        );
+    }
+
+    response
 }
 
 pub fn modal_title(ui: &mut Ui, tokens: &ThemeTokens, title: &str, detail: &str) {
@@ -353,6 +379,8 @@ fn button_with_visual(
         .min_size(Vec2::new(style.min_width, tokens.spacing.button_height)),
     );
 
+    let response = response.on_hover_cursor(CursorIcon::PointingHand);
+
     match visual {
         ActionVisual::Icon(_) => response.on_hover_text(tooltip),
         ActionVisual::Text(_) => response,
@@ -371,7 +399,11 @@ fn button_rich_text(
             let text = RichText::new(label)
                 .size(tokens.typography.body)
                 .color(color);
-            if strong { text.strong() } else { text }
+            if strong {
+                text.strong()
+            } else {
+                text
+            }
         }
         ActionVisual::Icon(icon) => icon_rich_text(tokens, layout, icon, color),
     }
@@ -458,6 +490,7 @@ fn action_label(action: AppActionKind) -> &'static str {
         AppActionKind::Dismiss => "DISMISS",
         AppActionKind::Cancel => "CANCEL",
         AppActionKind::ConfirmConnect => "CONNECT",
+        AppActionKind::Forget => "FORGET",
     }
 }
 
@@ -473,6 +506,7 @@ fn action_icon(action: AppActionKind) -> AppIcon {
         AppActionKind::Retry => AppIcon::Retry,
         AppActionKind::Dismiss | AppActionKind::Cancel => AppIcon::Close,
         AppActionKind::ConfirmConnect => AppIcon::Confirm,
+        AppActionKind::Forget => AppIcon::Forget,
     }
 }
 
@@ -490,5 +524,6 @@ fn icon_ligature(icon: AppIcon) -> &'static str {
         AppIcon::Retry => "\u{e5d5}",
         AppIcon::Close => "\u{e5cd}",
         AppIcon::Confirm => "\u{e5ca}",
+        AppIcon::Forget => "\u{e92b}",
     }
 }

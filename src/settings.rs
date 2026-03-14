@@ -50,7 +50,7 @@ impl AppSettings {
 }
 
 pub fn settings_path() -> anyhow::Result<PathBuf> {
-    let project_dirs = ProjectDirs::from("dev", "gitfudge", "inno")
+    let project_dirs = ProjectDirs::from("dev", "gitfudge", "innu")
         .ok_or_else(|| anyhow::anyhow!("failed to resolve XDG configuration directory"))?;
     Ok(project_dirs.config_dir().join("settings.toml"))
 }

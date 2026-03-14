@@ -2,9 +2,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use eframe::egui::{
-    Align, Align2, CentralPanel, ComboBox, Context, Id, Layout, RichText, ScrollArea, Ui, Vec2,
-    ViewportCommand, Window,
+    Align, Align2, CentralPanel, ComboBox, Context, Id, Layout, RichText, ScrollArea,
+    Ui, Vec2, ViewportCommand, Window,
 };
+use eframe::egui::scroll_area::ScrollBarVisibility;
 use eframe::{App, CreationContext};
 
 use crate::backend::nm::{BackendController, WifiController};
@@ -21,6 +22,8 @@ use crate::ui::theme::{
     LayoutClass, ThemeChoice, ThemeTokens, apply_theme, layout_class_for_width, load_theme_prefs,
     save_theme_prefs,
 };
+
+const APP_VERSION_LABEL: &str = concat!("v", env!("CARGO_PKG_VERSION"));
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MessageTone {
@@ -51,6 +54,17 @@ struct HiddenDialogState {
     reveal_password: bool,
 }
 
+#[derive(Debug, Clone)]
+struct ForgetDialogState {
+    ssid: String,
+    in_use: bool,
+}
+
+#[derive(Debug, Clone)]
+struct NetworkDetailsState {
+    network: AccessPointGroup,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct NetworkRowMode {
     show_badges: bool,
@@ -64,10 +78,13 @@ pub struct WifiApp {
     tray: Option<TrayBridge>,
     pending_operation: Option<String>,
     refreshing_networks: bool,
+    last_snapshot_at: Option<Instant>,
     last_message_at: Option<Instant>,
     inline_message: Option<InlineMessage>,
     connect_dialog: Option<ConnectDialogState>,
     hidden_dialog: Option<HiddenDialogState>,
+    forget_dialog: Option<ForgetDialogState>,
+    details_dialog: Option<NetworkDetailsState>,
     last_connect_attempt: Option<ConnectRequest>,
     quit_requested: bool,
     theme_choice: ThemeChoice,
@@ -94,10 +111,13 @@ impl WifiApp {
             tray,
             pending_operation: None,
             refreshing_networks: false,
+            last_snapshot_at: None,
             last_message_at: None,
             inline_message: None,
             connect_dialog: None,
             hidden_dialog: None,
+            forget_dialog: None,
+            details_dialog: None,
             last_connect_attempt: None,
             quit_requested: false,
             theme_choice,
@@ -110,6 +130,8 @@ impl WifiApp {
             match event {
                 WifiEvent::SnapshotUpdated(snapshot) => {
                     self.snapshot = *snapshot;
+                    self.last_snapshot_at = Some(Instant::now());
+                    self.sync_details_dialog();
                     if let Some(tray) = &self.tray {
                         tray.apply_snapshot(&self.snapshot);
                     }
@@ -253,6 +275,45 @@ impl WifiApp {
         });
     }
 
+    fn open_forget_dialog(&mut self, network: &AccessPointGroup) {
+        if !network.known {
+            return;
+        }
+
+        self.forget_dialog = Some(ForgetDialogState {
+            ssid: network.ssid.clone(),
+            in_use: network.in_use,
+        });
+    }
+
+    fn open_details_dialog(&mut self, network: &AccessPointGroup) {
+        self.details_dialog = Some(NetworkDetailsState {
+            network: network.clone(),
+        });
+    }
+
+    fn sync_details_dialog(&mut self) {
+        let Some(dialog) = &mut self.details_dialog else {
+            return;
+        };
+
+        if let Some(network) = self
+            .snapshot
+            .visible_networks
+            .iter()
+            .find(|network| network.ssid == dialog.network.ssid)
+        {
+            dialog.network = network.clone();
+        } else {
+            dialog.network.in_use = self
+                .snapshot
+                .current_connection
+                .as_ref()
+                .map(|connection| connection.ssid == dialog.network.ssid)
+                .unwrap_or(false);
+        }
+    }
+
     fn update_theme(
         &mut self,
         ctx: &Context,
@@ -324,25 +385,19 @@ impl WifiApp {
         _available_width: f32,
     ) {
         let mut disconnect_clicked = false;
-        let viewport_size = ctx.content_rect().size();
-        let viewport_label = format!(
-            "{:.0}x{:.0}",
-            viewport_size.x.max(0.0),
-            viewport_size.y.max(0.0)
-        );
 
         ui.horizontal(|ui| {
             ui.horizontal(|ui| {
                 ui.label(
-                    RichText::new("Inno Wi-Fi")
+                    RichText::new("Innu")
                         .size(self.tokens.typography.title)
                         .color(self.tokens.colors.text_primary)
                         .strong(),
                 );
                 ui.add_space(self.tokens.spacing.tight);
                 ui.label(
-                    RichText::new(viewport_label)
-                        .size(self.tokens.typography.micro)
+                    RichText::new(APP_VERSION_LABEL)
+                        .size(self.tokens.typography.helper)
                         .color(self.tokens.colors.text_secondary),
                 );
             });
@@ -583,9 +638,15 @@ impl WifiApp {
             return;
         }
 
-        let list_height = ui.available_height().max(0.0);
-        ScrollArea::vertical()
+        let indicator_height = self.tokens.typography.helper + self.tokens.spacing.tight;
+        let (top_indicator_rect, _) = ui.allocate_exact_size(
+            Vec2::new(available_width, indicator_height),
+            eframe::egui::Sense::hover(),
+        );
+        let list_height = (ui.available_height() - indicator_height).max(0.0);
+        let scroll_output = ScrollArea::vertical()
             .auto_shrink([false, false])
+            .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
             .max_height(list_height)
             .min_scrolled_height(list_height)
             .show(ui, |ui| {
@@ -595,6 +656,41 @@ impl WifiApp {
                     ui.add_space(self.tokens.spacing.row_to_row_gap);
                 }
             });
+        let (bottom_indicator_rect, _) = ui.allocate_exact_size(
+            Vec2::new(available_width, indicator_height),
+            eframe::egui::Sense::hover(),
+        );
+
+        let has_scroll = scroll_output.content_size.y > scroll_output.inner_rect.height() + 1.0;
+        if has_scroll {
+            let max_offset =
+                (scroll_output.content_size.y - scroll_output.inner_rect.height()).max(0.0);
+            let offset = scroll_output.state.offset.y;
+            let show_top = offset > 1.0;
+            let show_bottom = offset < max_offset - 1.0;
+
+            ui.painter().text(
+                top_indicator_rect.center(),
+                Align2::CENTER_CENTER,
+                if show_top { "▲" } else { " " },
+                eframe::egui::FontId::new(
+                    self.tokens.typography.section,
+                    eframe::egui::FontFamily::Monospace,
+                ),
+                self.tokens.colors.text_secondary,
+            );
+
+            ui.painter().text(
+                bottom_indicator_rect.center(),
+                Align2::CENTER_CENTER,
+                if show_bottom { "▼" } else { " " },
+                eframe::egui::FontId::new(
+                    self.tokens.typography.section,
+                    eframe::egui::FontFamily::Monospace,
+                ),
+                self.tokens.colors.text_secondary,
+            );
+        }
     }
 
     fn render_list_empty(&self, ui: &mut Ui, title: &str, detail: &str) {
@@ -635,8 +731,9 @@ impl WifiApp {
             network.band_summary
         );
         let mut connect_clicked = false;
+        let mut forget_clicked = false;
 
-        components::network_row(ui, &tokens, layout, row_state, |ui| {
+        let row_response = components::network_row(ui, &tokens, layout, row_state, |ui| {
             if row_mode.action_below {
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {
@@ -660,14 +757,27 @@ impl WifiApp {
                     ui.add_space(tokens.spacing.control_to_label_gap);
                     ui.scope(|ui| {
                         ui.set_min_height(tokens.spacing.button_height);
-                        ui.set_max_height(tokens.spacing.button_height);
                         let enabled = !network.in_use && network.security.is_supported();
                         let response = ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                            ui.add_enabled_ui(enabled, |ui| {
-                                components::primary_button(ui, &tokens, layout, row_mode.action)
+                            ui.horizontal(|ui| {
+                                if network.known
+                                    && components::secondary_button(
+                                        ui,
+                                        &tokens,
+                                        layout,
+                                        AppActionKind::Forget,
+                                    )
+                                    .clicked()
+                                {
+                                    forget_clicked = true;
+                                }
+
+                                ui.add_enabled_ui(enabled, |ui| {
+                                    components::primary_button(ui, &tokens, layout, row_mode.action)
+                                })
                             })
                         });
-                        if enabled && response.inner.inner.clicked() {
+                        if enabled && response.inner.inner.inner.clicked() {
                             connect_clicked = true;
                         }
                     });
@@ -696,6 +806,18 @@ impl WifiApp {
                     });
 
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if network.known
+                            && components::secondary_button(
+                                ui,
+                                &tokens,
+                                layout,
+                                AppActionKind::Forget,
+                            )
+                            .clicked()
+                        {
+                            forget_clicked = true;
+                        }
+
                         let enabled = !network.in_use && network.security.is_supported();
                         let response = ui.add_enabled_ui(enabled, |ui| {
                             components::primary_button(ui, &tokens, layout, row_mode.action)
@@ -710,6 +832,12 @@ impl WifiApp {
 
         if connect_clicked {
             self.begin_network_connect(network);
+        }
+        if forget_clicked {
+            self.open_forget_dialog(network);
+        }
+        if row_response.response.clicked() && !connect_clicked && !forget_clicked {
+            self.open_details_dialog(network);
         }
     }
 
@@ -757,48 +885,45 @@ impl WifiApp {
             .max_height(modal_max_height)
             .open(&mut keep_open)
             .show(ctx, |ui| {
-                ScrollArea::vertical()
-                    .max_height(modal_max_height - self.tokens.spacing.standard * 2.0)
-                    .show(ui, |ui| {
-                        modal_title(
-                            ui,
-                            &self.tokens,
-                            &format!("Connect to {}", dialog.network.ssid),
-                            "Enter the network password.",
-                        );
-                        ui.add_space(self.tokens.spacing.section_body_gap);
-                        field_label(ui, &self.tokens, "PASSWORD");
-                        ui.add(
-                            components::text_field(&mut dialog.passphrase)
-                                .password(!dialog.reveal_password),
-                        );
-                        ui.add_space(self.tokens.spacing.text_stack_gap);
-                        ui.checkbox(&mut dialog.reveal_password, "Show password");
-                        ui.add_space(self.tokens.spacing.control_to_label_gap);
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if components::primary_button(
-                                &mut *ui,
-                                &self.tokens,
-                                layout,
-                                AppActionKind::ConfirmConnect,
-                            )
-                            .clicked()
-                                && can_submit
-                            {
-                                submit = true;
-                            }
-                            if components::secondary_button(
-                                &mut *ui,
-                                &self.tokens,
-                                layout,
-                                AppActionKind::Cancel,
-                            )
-                            .clicked()
-                            {
-                                request_close = true;
-                            }
-                        });
-                    });
+                ui.set_max_width(modal_width);
+                modal_title(
+                    ui,
+                    &self.tokens,
+                    &format!("Connect to {}", dialog.network.ssid),
+                    "Enter the network password.",
+                );
+                ui.add_space(self.tokens.spacing.section_body_gap);
+                field_label(ui, &self.tokens, "PASSWORD");
+                ui.add(
+                    components::text_field(&mut dialog.passphrase)
+                        .password(!dialog.reveal_password),
+                );
+                ui.add_space(self.tokens.spacing.text_stack_gap);
+                ui.checkbox(&mut dialog.reveal_password, "Show password");
+                ui.add_space(self.tokens.spacing.section_body_gap);
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if components::primary_button(
+                        &mut *ui,
+                        &self.tokens,
+                        layout,
+                        AppActionKind::ConfirmConnect,
+                    )
+                    .clicked()
+                        && can_submit
+                    {
+                        submit = true;
+                    }
+                    if components::secondary_button(
+                        &mut *ui,
+                        &self.tokens,
+                        layout,
+                        AppActionKind::Cancel,
+                    )
+                    .clicked()
+                    {
+                        request_close = true;
+                    }
+                });
             });
 
         if request_close {
@@ -868,73 +993,66 @@ impl WifiApp {
             .max_height(modal_max_height)
             .open(&mut keep_open)
             .show(ctx, |ui| {
-                ScrollArea::vertical()
-                    .max_height(modal_max_height - self.tokens.spacing.standard * 2.0)
-                    .show(ui, |ui| {
-                        modal_title(
-                            ui,
-                            &self.tokens,
-                            "Join Hidden Network",
-                            "Enter only the details you need.",
+                ui.set_max_width(modal_width);
+                modal_title(
+                    ui,
+                    &self.tokens,
+                    "Join Hidden Network",
+                    "Enter only the details you need.",
+                );
+                ui.add_space(self.tokens.spacing.section_body_gap);
+
+                field_label(ui, &self.tokens, "NETWORK NAME");
+                ui.add(components::text_field(&mut dialog.ssid));
+                ui.add_space(self.tokens.spacing.section_body_gap);
+
+                field_label(ui, &self.tokens, "SECURITY");
+                ComboBox::from_id_salt("hidden-security")
+                    .selected_text(dialog.security.label())
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut dialog.security,
+                            SecurityKind::WpaPsk,
+                            "WPA Personal",
                         );
-                        ui.add_space(self.tokens.spacing.section_body_gap);
-
-                        field_label(ui, &self.tokens, "NETWORK NAME");
-                        ui.add(components::text_field(&mut dialog.ssid));
-                        ui.add_space(self.tokens.spacing.section_body_gap);
-
-                        field_label(ui, &self.tokens, "SECURITY");
-                        ComboBox::from_id_salt("hidden-security")
-                            .selected_text(dialog.security.label())
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(
-                                    &mut dialog.security,
-                                    SecurityKind::WpaPsk,
-                                    "WPA Personal",
-                                );
-                                ui.selectable_value(
-                                    &mut dialog.security,
-                                    SecurityKind::Open,
-                                    "Open",
-                                );
-                            });
-
-                        if dialog.security.requires_passphrase() {
-                            ui.add_space(self.tokens.spacing.section_body_gap);
-                            field_label(ui, &self.tokens, "PASSWORD");
-                            ui.add(
-                                components::text_field(&mut dialog.passphrase)
-                                    .password(!dialog.reveal_password),
-                            );
-                            ui.add_space(self.tokens.spacing.text_stack_gap);
-                            ui.checkbox(&mut dialog.reveal_password, "Show password");
-                        }
-
-                        ui.add_space(self.tokens.spacing.control_to_label_gap);
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if components::primary_button(
-                                &mut *ui,
-                                &self.tokens,
-                                layout,
-                                AppActionKind::ConfirmConnect,
-                            )
-                            .clicked()
-                                && can_submit
-                            {
-                                submit = true;
-                            }
-                            if components::secondary_button(
-                                &mut *ui,
-                                &self.tokens,
-                                layout,
-                                AppActionKind::Cancel,
-                            )
-                            .clicked()
-                            {
-                                request_close = true;
-                            }
-                        });
+                        ui.selectable_value(&mut dialog.security, SecurityKind::Open, "Open");
                     });
+
+                if dialog.security.requires_passphrase() {
+                    ui.add_space(self.tokens.spacing.section_body_gap);
+                    field_label(ui, &self.tokens, "PASSWORD");
+                    ui.add(
+                        components::text_field(&mut dialog.passphrase)
+                            .password(!dialog.reveal_password),
+                    );
+                    ui.add_space(self.tokens.spacing.text_stack_gap);
+                    ui.checkbox(&mut dialog.reveal_password, "Show password");
+                }
+
+                ui.add_space(self.tokens.spacing.section_body_gap);
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if components::primary_button(
+                        &mut *ui,
+                        &self.tokens,
+                        layout,
+                        AppActionKind::ConfirmConnect,
+                    )
+                    .clicked()
+                        && can_submit
+                    {
+                        submit = true;
+                    }
+                    if components::secondary_button(
+                        &mut *ui,
+                        &self.tokens,
+                        layout,
+                        AppActionKind::Cancel,
+                    )
+                    .clicked()
+                    {
+                        request_close = true;
+                    }
+                });
             });
 
         if request_close {
@@ -968,6 +1086,256 @@ impl WifiApp {
 
         if !keep_open && let Some(mut dialog) = self.hidden_dialog.take() {
             dialog.passphrase.clear();
+        }
+    }
+
+    fn render_forget_dialog(&mut self, ctx: &Context, layout: LayoutClass) {
+        let Some(dialog) = &self.forget_dialog else {
+            return;
+        };
+
+        let mut keep_open = true;
+        let mut request_close = false;
+        let mut submit = false;
+        let content_rect = ctx.content_rect();
+        let modal_width = modal_width_for(
+            layout,
+            content_rect.width(),
+            self.tokens.spacing.page_padding,
+        );
+        let modal_max_height = modal_max_height_for(layout, content_rect.height());
+        let is_sheet = layout == LayoutClass::Compact;
+        let title = format!("Forget {}?", dialog.ssid);
+        let detail = if dialog.in_use {
+            "This will disconnect the current network and remove its saved profile."
+        } else {
+            "This will remove the saved profile and password for this network."
+        };
+
+        Window::new("forget-dialog")
+            .id(Id::new("forget-dialog"))
+            .anchor(
+                if is_sheet {
+                    Align2::CENTER_BOTTOM
+                } else {
+                    Align2::CENTER_CENTER
+                },
+                [
+                    0.0,
+                    if is_sheet {
+                        -self.tokens.spacing.page_padding
+                    } else {
+                        0.0
+                    },
+                ],
+            )
+            .collapsible(false)
+            .resizable(false)
+            .title_bar(false)
+            .frame(modal_shell(&self.tokens, layout))
+            .min_width(modal_width)
+            .max_width(modal_width)
+            .max_height(modal_max_height)
+            .open(&mut keep_open)
+            .show(ctx, |ui| {
+                ui.set_max_width(modal_width);
+                modal_title(ui, &self.tokens, &title, detail);
+                ui.add_space(self.tokens.spacing.section_body_gap);
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if components::primary_button(
+                        &mut *ui,
+                        &self.tokens,
+                        layout,
+                        AppActionKind::Forget,
+                    )
+                    .clicked()
+                    {
+                        submit = true;
+                    }
+                    if components::secondary_button(
+                        &mut *ui,
+                        &self.tokens,
+                        layout,
+                        AppActionKind::Cancel,
+                    )
+                    .clicked()
+                    {
+                        request_close = true;
+                    }
+                });
+            });
+
+        if request_close {
+            keep_open = false;
+        }
+
+        if submit {
+            if let Some(dialog) = self.forget_dialog.take() {
+                self.send(WifiCommand::Forget(dialog.ssid));
+            }
+            return;
+        }
+
+        if !keep_open {
+            self.forget_dialog = None;
+        }
+    }
+
+    fn render_details_dialog(&mut self, ctx: &Context, layout: LayoutClass) {
+        let Some(dialog) = self.details_dialog.clone() else {
+            return;
+        };
+
+        let mut keep_open = true;
+        let mut request_close = false;
+        let mut connect_clicked = false;
+        let mut disconnect_clicked = false;
+        let mut forget_clicked = false;
+        let content_rect = ctx.content_rect();
+        let modal_width = modal_width_for(
+            layout,
+            content_rect.width(),
+            self.tokens.spacing.page_padding,
+        );
+        let modal_max_height = modal_max_height_for(layout, content_rect.height());
+        let is_sheet = layout == LayoutClass::Compact;
+        let network = dialog.network;
+        let signal = describe_signal(network.signal);
+        let last_scanned = self
+            .last_snapshot_at
+            .map(format_elapsed)
+            .unwrap_or_else(|| "Just now".into());
+        let support = if network.security.is_supported() {
+            "Supported"
+        } else {
+            "Unsupported in this version"
+        };
+        let primary_action = details_primary_action(&network);
+
+        Window::new("details-dialog")
+            .id(Id::new("details-dialog"))
+            .anchor(
+                if is_sheet {
+                    Align2::CENTER_BOTTOM
+                } else {
+                    Align2::CENTER_CENTER
+                },
+                [
+                    0.0,
+                    if is_sheet {
+                        -self.tokens.spacing.page_padding
+                    } else {
+                        0.0
+                    },
+                ],
+            )
+            .collapsible(false)
+            .resizable(false)
+            .title_bar(false)
+            .frame(modal_shell(&self.tokens, layout))
+            .min_width(modal_width)
+            .max_width(modal_width)
+            .max_height(modal_max_height)
+            .open(&mut keep_open)
+            .show(ctx, |ui| {
+                ui.set_max_width(modal_width);
+                modal_title(
+                    ui,
+                    &self.tokens,
+                    &network.ssid,
+                    "Connection details for this network.",
+                );
+                ui.add_space(self.tokens.spacing.section_body_gap);
+
+                ui.horizontal_wrapped(|ui| {
+                    render_network_badges(ui, &self.tokens, &network);
+                });
+
+                if network.known || network.in_use || !network.security.is_supported() {
+                    ui.add_space(self.tokens.spacing.section_body_gap);
+                }
+
+                render_detail_row(ui, &self.tokens, "STATUS", status_label(&network));
+                ui.add_space(self.tokens.spacing.control_to_label_gap);
+                render_detail_row(ui, &self.tokens, "SECURITY", network.security.label());
+                ui.add_space(self.tokens.spacing.control_to_label_gap);
+                render_detail_row(ui, &self.tokens, "SIGNAL", &signal);
+                ui.add_space(self.tokens.spacing.control_to_label_gap);
+                render_detail_row(ui, &self.tokens, "QUALITY", signal_quality_label(network.signal));
+                ui.add_space(self.tokens.spacing.control_to_label_gap);
+                render_detail_row(ui, &self.tokens, "BAND", &network.band_summary);
+                ui.add_space(self.tokens.spacing.control_to_label_gap);
+                render_detail_row(ui, &self.tokens, "PROFILE", saved_profile_label(&network));
+                ui.add_space(self.tokens.spacing.control_to_label_gap);
+                render_detail_row(ui, &self.tokens, "DEVICE", &network.device_id);
+                ui.add_space(self.tokens.spacing.control_to_label_gap);
+                render_detail_row(ui, &self.tokens, "LAST SCANNED", &last_scanned);
+                ui.add_space(self.tokens.spacing.control_to_label_gap);
+                render_detail_row(ui, &self.tokens, "SUPPORT", support);
+
+                ui.add_space(self.tokens.spacing.section_body_gap);
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if components::secondary_button(
+                        &mut *ui,
+                        &self.tokens,
+                        layout,
+                        AppActionKind::Cancel,
+                    )
+                    .clicked()
+                    {
+                        request_close = true;
+                    }
+
+                    if network.known
+                        && components::secondary_button(
+                            &mut *ui,
+                            &self.tokens,
+                            layout,
+                            AppActionKind::Forget,
+                        )
+                        .clicked()
+                    {
+                        forget_clicked = true;
+                    }
+
+                    if let Some(action) = primary_action {
+                        let clicked = if matches!(action, AppActionKind::Disconnect) {
+                            components::secondary_button(&mut *ui, &self.tokens, layout, action)
+                                .clicked()
+                        } else {
+                            components::primary_button(&mut *ui, &self.tokens, layout, action)
+                                .clicked()
+                        };
+
+                        if clicked {
+                            match action {
+                                AppActionKind::Disconnect => disconnect_clicked = true,
+                                _ => connect_clicked = true,
+                            }
+                        }
+                    }
+                });
+            });
+
+        if request_close {
+            keep_open = false;
+        }
+
+        if connect_clicked {
+            keep_open = false;
+            self.begin_network_connect(&network);
+        }
+        if disconnect_clicked {
+            keep_open = false;
+            self.send(WifiCommand::Disconnect);
+        }
+        if forget_clicked {
+            keep_open = false;
+            self.open_forget_dialog(&network);
+        }
+
+        if !keep_open {
+            self.details_dialog = None;
         }
     }
 
@@ -1030,6 +1398,8 @@ impl App for WifiApp {
 
         self.render_connect_dialog(ctx, layout);
         self.render_hidden_dialog(ctx, layout);
+        self.render_forget_dialog(ctx, layout);
+        self.render_details_dialog(ctx, layout);
         ctx.request_repaint_after(Duration::from_millis(250));
     }
 
@@ -1049,6 +1419,73 @@ fn passphrase_valid(security: SecurityKind, passphrase: &str) -> bool {
 
 fn hidden_form_valid(dialog: &HiddenDialogState) -> bool {
     !dialog.ssid.trim().is_empty() && passphrase_valid(dialog.security, &dialog.passphrase)
+}
+
+fn render_detail_row(ui: &mut Ui, tokens: &ThemeTokens, label: &str, value: &str) {
+    field_label(ui, tokens, label);
+    ui.add_space(tokens.spacing.text_stack_gap);
+    ui.label(
+        RichText::new(value)
+            .size(tokens.typography.body)
+            .color(tokens.colors.text_primary),
+    );
+}
+
+fn status_label(network: &AccessPointGroup) -> &'static str {
+    if network.in_use {
+        "Connected"
+    } else if network.known {
+        "Saved"
+    } else {
+        "Available"
+    }
+}
+
+fn describe_signal(signal: Option<u8>) -> String {
+    match signal {
+        Some(strength) => format!("{}  {}%", signal_bars(Some(strength)), strength),
+        None => "Unknown".into(),
+    }
+}
+
+fn format_elapsed(instant: Instant) -> String {
+    let elapsed = instant.elapsed();
+    let seconds = elapsed.as_secs();
+
+    match seconds {
+        0..=4 => "Just now".into(),
+        5..=59 => format!("{}s ago", seconds),
+        60..=3599 => format!("{}m ago", seconds / 60),
+        _ => format!("{}h ago", seconds / 3600),
+    }
+}
+
+fn signal_quality_label(signal: Option<u8>) -> &'static str {
+    match signal.unwrap_or_default() {
+        0..=20 => "Weak",
+        21..=40 => "Fair",
+        41..=60 => "Good",
+        61..=80 => "Very good",
+        _ => "Excellent",
+    }
+}
+
+fn saved_profile_label(network: &AccessPointGroup) -> &'static str {
+    if network.known {
+        "Saved"
+    } else {
+        "Not saved"
+    }
+}
+
+fn details_primary_action(network: &AccessPointGroup) -> Option<AppActionKind> {
+    if network.in_use {
+        Some(AppActionKind::Disconnect)
+    } else if !network.security.is_supported() {
+        None
+    } else {
+        Some(action_for_network(network))
+    }
 }
 
 fn is_refresh_operation(message: &str) -> bool {

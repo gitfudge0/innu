@@ -5,7 +5,7 @@ use ksni::blocking::{Handle, TrayMethods};
 use ksni::menu::{StandardItem, SubMenu};
 
 use crate::backend::nm::CommandSender;
-use crate::model::{AccessPointGroup, AppSnapshot, ConnectRequest, WifiCommand, signal_bars};
+use crate::model::{signal_bars, AccessPointGroup, AppSnapshot, ConnectRequest, WifiCommand};
 
 #[derive(Clone)]
 pub struct TrayBridge {
@@ -46,7 +46,7 @@ pub enum TraySignal {
 impl TrayBridge {
     pub fn spawn(command_tx: CommandSender) -> anyhow::Result<Self> {
         let state = Arc::new(Mutex::new(TrayState {
-            title: "Inno Wi-Fi".into(),
+            title: "Innu - Network Management".into(),
             subtitle: "Not connected".into(),
             icon_name: "network-wireless-offline".into(),
             ..Default::default()
@@ -77,8 +77,8 @@ impl TrayBridge {
         state.title = state
             .connected_ssid
             .as_ref()
-            .map(|ssid| format!("Inno Wi-Fi · {ssid}"))
-            .unwrap_or_else(|| "Inno Wi-Fi".into());
+            .map(|ssid| format!("Innu - Network Management · {ssid}"))
+            .unwrap_or_else(|| "Innu - Network Management".into());
         state.subtitle = if !snapshot.manager_running {
             "NetworkManager unavailable".into()
         } else if !snapshot.wifi_available {
@@ -123,7 +123,7 @@ impl TrayBridge {
 
 impl ksni::Tray for WifiTray {
     fn id(&self) -> String {
-        "inno".into()
+        "innu".into()
     }
 
     fn title(&self) -> String {

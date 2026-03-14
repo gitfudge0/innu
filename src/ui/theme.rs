@@ -311,7 +311,7 @@ pub fn save_theme_prefs(theme: ThemeChoice) -> anyhow::Result<()> {
 }
 
 fn prefs_path() -> anyhow::Result<PathBuf> {
-    let project_dirs = ProjectDirs::from("dev", "gitfudge", "inno")
+    let project_dirs = ProjectDirs::from("dev", "gitfudge", "innu")
         .ok_or_else(|| anyhow::anyhow!("failed to resolve XDG configuration directory"))?;
     Ok(project_dirs.config_dir().join("theme.toml"))
 }
