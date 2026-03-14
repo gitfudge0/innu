@@ -1,0 +1,28 @@
+[package]
+name = "inno"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.100"
+directories = "6.0.0"
+eframe = { version = "0.33.3", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+egui = "0.33.3"
+ksni = { version = "0.3.3", features = ["blocking"] }
+nmrs = "2.0.1"
+notify-rust = "4.12.0"
+serde = { version = "1.0.228", features = ["derive"] }
+thiserror = "2.0.17"
+tokio = { version = "=1.49.0", features = ["rt-multi-thread", "time"] }
+toml = "0.9.8"
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.20", features = ["fmt", "env-filter"] }
+zbus = "5.14.0"
+zvariant = "5.10.0"
+
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
