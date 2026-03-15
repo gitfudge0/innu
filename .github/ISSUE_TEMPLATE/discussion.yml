@@ -1,0 +1,59 @@
+name: Discussion
+description: Start a general discussion, ask questions, or share ideas
+title: "[Discussion]: "
+labels: ["discussion", "question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for general discussions, questions, or sharing ideas that don't fit into bug reports or feature requests.
+  
+  - type: input
+    id: topic
+    attributes:
+      label: Topic
+      description: What's the main topic of this discussion?
+      placeholder: e.g., Architecture decisions, Usage questions, Future roadmap...
+    validations:
+      required: true
+  
+  - type: dropdown
+    id: type
+    attributes:
+      label: Discussion Type
+      description: What kind of discussion is this?
+      options:
+        - Question / Help
+        - Idea / Proposal
+        - Architecture / Design
+        - General Discussion
+        - Other
+    validations:
+      required: true
+  
+  - type: textarea
+    id: context
+    attributes:
+      label: Context & Description
+      description: Provide detailed context for your discussion
+      placeholder: |
+        Describe what you'd like to discuss...
+        
+        For questions:
+        - What are you trying to accomplish?
+        - What have you already tried?
+        
+        For ideas/proposals:
+        - What's the motivation?
+        - What are the potential impacts?
+    validations:
+      required: true
+  
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Information
+      description: Any other relevant details, links, or resources
+      placeholder: Links to relevant docs, related issues, etc.
+    validations:
+      required: false

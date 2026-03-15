@@ -1,0 +1,135 @@
+name: Bug Report
+description: File a bug report to help us improve Innu
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this bug report!
+  
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the bug is
+      placeholder: Describe the bug...
+    validations:
+      required: true
+  
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Steps to reproduce the behavior
+      placeholder: |
+        1. Go to '...'
+        2. Click on '...'
+        3. Scroll down to '...'
+        4. See error
+    validations:
+      required: true
+  
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What you expected to happen
+      placeholder: Describe what should have happened...
+    validations:
+      required: true
+  
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened
+      placeholder: Describe what actually happened...
+    validations:
+      required: true
+  
+  - type: dropdown
+    id: distro
+    attributes:
+      label: Linux Distribution
+      description: What Linux distribution are you using?
+      options:
+        - Ubuntu
+        - Debian
+        - Fedora
+        - Arch Linux
+        - Manjaro
+        - Pop!_OS
+        - openSUSE
+        - Other (specify in Additional Context)
+    validations:
+      required: true
+  
+  - type: dropdown
+    id: de
+    attributes:
+      label: Desktop Environment
+      description: What desktop environment are you using?
+      options:
+        - GNOME
+        - KDE Plasma
+        - XFCE
+        - i3/sway
+        - Hyprland
+        - Cinnamon
+        - MATE
+        - Budgie
+        - Other (specify in Additional Context)
+    validations:
+      required: true
+  
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: Installation Method
+      description: How did you install Innu?
+      options:
+        - Quick install script (curl)
+        - Local install from checkout
+        - Cargo build --release
+        - Other (specify in Additional Context)
+    validations:
+      required: true
+  
+  - type: input
+    id: innu_version
+    attributes:
+      label: Innu Version
+      description: What version of Innu are you using? (output of `innu --version`)
+      placeholder: e.g., 0.1.0
+    validations:
+      required: true
+  
+  - type: input
+    id: nm_version
+    attributes:
+      label: NetworkManager Version
+      description: What version of NetworkManager is running?
+      placeholder: e.g., 1.42.0
+    validations:
+      required: false
+  
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs & Screenshots
+      description: |
+        Please provide any relevant logs or screenshots
+        To get logs, run Innu from terminal: `RUST_LOG=debug innu`
+      placeholder: Paste logs or drag & drop screenshots...
+    validations:
+      required: false
+  
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Add any other context about the problem here
+      placeholder: Any other relevant information...
+    validations:
+      required: false
