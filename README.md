@@ -10,6 +10,14 @@ Innu(INternet Network Utility) is a Rust-based Wi-Fi manager for Linux desktops 
 curl -fsSL https://raw.githubusercontent.com/gitfudge0/innu/refs/heads/main/install.sh | bash
 ```
 
+### AUR
+
+```bash
+yay -S innu-git
+```
+
+The AUR package installs the system-wide binary and desktop entry.
+
 ![Innu screenshot](assets/screenshot.png)
 
 ### Local install from a checkout
@@ -43,7 +51,7 @@ cargo run --release
 
 ## Usage
 
-Launch Innu from your applications menu or from a terminal:
+Launch Innu from a terminal:
 
 ```bash
 innu
@@ -57,7 +65,7 @@ innu --version
 innu uninstall
 ```
 
-`innu uninstall` removes the installed binary, desktop entry, autostart entry, and app configuration after confirmation.
+`innu uninstall` removes a user-local install after confirmation. If Innu was installed with a package manager, it prints the removal command and optional user-data cleanup paths instead.
 
 ## Development
 

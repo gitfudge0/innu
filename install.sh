@@ -12,6 +12,7 @@ INSTALL_BIN_DIR="${HOME}/.local/bin"
 INSTALL_SHARE_DIR="${HOME}/.local/share/applications"
 INSTALL_BIN_PATH="${INSTALL_BIN_DIR}/${BIN_NAME}"
 INSTALL_DESKTOP_PATH="${INSTALL_SHARE_DIR}/${BIN_NAME}.desktop"
+DESKTOP_SOURCE_PATH=""
 SOURCE_DIR=""
 TEMP_SOURCE_DIR=""
 
@@ -78,6 +79,12 @@ install_innu() {
 
   require_cmd cargo
   mkdir -p "$INSTALL_BIN_DIR" "$INSTALL_SHARE_DIR"
+  DESKTOP_SOURCE_PATH="$source_dir/innu.desktop"
+
+  if [[ ! -f "$DESKTOP_SOURCE_PATH" ]]; then
+    echo "Missing desktop entry template: $DESKTOP_SOURCE_PATH" >&2
+    exit 1
+  fi
 
   echo "Building ${APP_NAME}..."
   cargo build --release --manifest-path "$source_dir/Cargo.toml"
@@ -86,15 +93,8 @@ install_innu() {
   install -m 0755 "$source_dir/target/release/${BIN_NAME}" "$INSTALL_BIN_PATH"
 
   echo "Installing desktop entry to ${INSTALL_DESKTOP_PATH}"
-  cat > "$INSTALL_DESKTOP_PATH" <<EOF
-[Desktop Entry]
-Type=Application
-Version=1.0
-Name=${APP_NAME}
-Exec=${INSTALL_BIN_PATH}
-Terminal=false
-Categories=Network;Utility;
-EOF
+  install -m 0644 "$DESKTOP_SOURCE_PATH" "$INSTALL_DESKTOP_PATH"
+  sed -i "s|^Exec=.*|Exec=${INSTALL_BIN_PATH}|" "$INSTALL_DESKTOP_PATH"
 }
 
 main() {

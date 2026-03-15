@@ -100,6 +100,6 @@ fn print_help() {
 
 fn help_text() -> String {
     format!(
-        "{APP_NAME} {VERSION}\n\nUsage:\n  innu\n  innu uninstall\n  innu --help\n  innu --version\n\nOptions:\n  -h, --help       Show this help message\n  -v, --version    Show the installed version\n\nCommands:\n  uninstall        Remove the installed binary, desktop entry, autostart entry, and app config"
+        "{APP_NAME} {VERSION}\n\nUsage:\n  innu\n  innu uninstall\n  innu --help\n  innu --version\n\nOptions:\n  -h, --help       Show this help message\n  -v, --version    Show the installed version\n\nCommands:\n  uninstall        Remove a user-local install or print guidance for package-managed installs"
     )
 }
