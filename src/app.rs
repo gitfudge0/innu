@@ -605,7 +605,7 @@ impl WifiApp {
         if self.refreshing_networks {
             self.render_list_empty(
                 ui,
-                "Refreshing nearby networks",
+                "Scanning...",
                 "Scanning for access points.",
             );
             return;
