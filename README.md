@@ -13,10 +13,16 @@ curl -fsSL https://raw.githubusercontent.com/gitfudge0/innu/refs/heads/main/inst
 ### AUR
 
 ```bash
+yay -S innu-bin
+```
+
+This installs the latest prebuilt release binaries system-wide.
+
+```bash
 yay -S innu-git
 ```
 
-The AUR package installs the system-wide binary and desktop entry.
+This builds Innu from source and installs the system-wide binary and desktop entry.
 
 ![Innu screenshot](assets/screenshot.png)
 
@@ -66,6 +72,8 @@ innu uninstall
 ```
 
 `innu uninstall` removes a user-local install after confirmation. If Innu was installed with a package manager, it prints the removal command and optional user-data cleanup paths instead.
+
+For package-managed installs, it prints removal guidance for both `innu-bin` and `innu-git`.
 
 ## Development
 

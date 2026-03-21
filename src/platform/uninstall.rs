@@ -111,6 +111,7 @@ fn print_package_managed_guidance(executable_path: &Path, targets: &UninstallTar
     println!("This looks like a package-managed install.");
     println!();
     println!("Remove it with your package manager, for example:");
+    println!("  sudo pacman -R innu-bin");
     println!("  sudo pacman -R innu-git");
     println!();
     println!("If you also want to clean user-specific files afterwards, remove these if present:");
