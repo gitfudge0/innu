@@ -5,7 +5,7 @@ use ksni::blocking::{Handle, TrayMethods};
 use ksni::menu::{StandardItem, SubMenu};
 
 use crate::backend::nm::CommandSender;
-use crate::model::{signal_bars, AccessPointGroup, AppSnapshot, ConnectRequest, WifiCommand};
+use crate::model::{AccessPointGroup, AppSnapshot, ConnectRequest, WifiCommand, signal_bars};
 
 #[derive(Clone)]
 pub struct TrayBridge {

@@ -18,6 +18,7 @@ use crate::model::{
 };
 
 pub type CommandSender = Sender<WifiCommand>;
+const FALLBACK_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 
 pub trait WifiController: Send + Sync {
     fn send(&self, command: WifiCommand) -> anyhow::Result<()>;
@@ -34,6 +35,13 @@ struct BackendWorker {
     connection: Connection,
     event_tx: Sender<WifiEvent>,
     transient_error: Option<String>,
+    monitor_cancellers: Vec<tokio::sync::oneshot::Sender<()>>,
+}
+
+enum BackendSignal {
+    Command(WifiCommand),
+    SnapshotRefresh,
+    MonitorFailed(&'static str, String),
 }
 
 impl BackendController {
@@ -82,14 +90,27 @@ fn backend_thread(
     event_tx: Sender<WifiEvent>,
 ) -> anyhow::Result<()> {
     let runtime = Runtime::new().context("failed to create tokio runtime")?;
-    let mut worker = initialize_worker(&runtime, &event_tx);
+    let (signal_tx, signal_rx) = mpsc::channel();
+    let relay_tx = signal_tx.clone();
+    thread::Builder::new()
+        .name("innu-networkmanager-relay".into())
+        .spawn(move || {
+            while let Ok(command) = command_rx.recv() {
+                if relay_tx.send(BackendSignal::Command(command)).is_err() {
+                    break;
+                }
+            }
+        })
+        .context("failed to spawn backend relay thread")?;
+
+    let mut worker = initialize_worker(&runtime, &event_tx, &signal_tx);
 
     loop {
-        match command_rx.recv_timeout(Duration::from_secs(5)) {
-            Ok(WifiCommand::Shutdown) => break,
-            Ok(command) => {
+        match signal_rx.recv_timeout(FALLBACK_REFRESH_INTERVAL) {
+            Ok(BackendSignal::Command(WifiCommand::Shutdown)) => break,
+            Ok(BackendSignal::Command(command)) => {
                 if worker.is_none() {
-                    worker = initialize_worker(&runtime, &event_tx);
+                    worker = initialize_worker(&runtime, &event_tx, &signal_tx);
                 }
 
                 if let Some(active_worker) = worker.as_mut() {
@@ -146,9 +167,9 @@ fn backend_thread(
                     ));
                 }
             }
-            Err(RecvTimeoutError::Timeout) => {
+            Ok(BackendSignal::SnapshotRefresh) | Err(RecvTimeoutError::Timeout) => {
                 if worker.is_none() {
-                    worker = initialize_worker(&runtime, &event_tx);
+                    worker = initialize_worker(&runtime, &event_tx, &signal_tx);
                 }
 
                 if let Some(active_worker) = worker.as_mut() {
@@ -171,6 +192,14 @@ fn backend_thread(
                     }
                 }
             }
+            Ok(BackendSignal::MonitorFailed(kind, message)) => {
+                let error_message = format!("{kind} monitoring stopped: {message}");
+                let _ = event_tx.send(WifiEvent::ErrorRaised(error_message.clone()));
+                let _ = event_tx.send(WifiEvent::SnapshotUpdated(Box::new(
+                    unavailable_snapshot(true, Some(error_message)),
+                )));
+                worker = None;
+            }
             Err(RecvTimeoutError::Disconnected) => break,
         }
     }
@@ -178,10 +207,15 @@ fn backend_thread(
     Ok(())
 }
 
-fn initialize_worker(runtime: &Runtime, event_tx: &Sender<WifiEvent>) -> Option<BackendWorker> {
+fn initialize_worker(
+    runtime: &Runtime,
+    event_tx: &Sender<WifiEvent>,
+    signal_tx: &Sender<BackendSignal>,
+) -> Option<BackendWorker> {
     match runtime.block_on(BackendWorker::new(event_tx.clone())) {
-        Ok(worker) => match runtime.block_on(worker.snapshot()) {
+        Ok(mut worker) => match runtime.block_on(worker.snapshot()) {
             Ok(snapshot) => {
+                worker.start_monitors(signal_tx.clone(), snapshot.wifi_available);
                 let _ = event_tx.send(WifiEvent::SnapshotUpdated(Box::new(snapshot)));
                 Some(worker)
             }
@@ -217,11 +251,92 @@ impl BackendWorker {
             connection,
             event_tx,
             transient_error: None,
+            monitor_cancellers: Vec::new(),
         })
     }
 
     fn clear_error(&mut self) {
         self.transient_error = None;
+    }
+
+    fn start_monitors(&mut self, signal_tx: Sender<BackendSignal>, wifi_available: bool) {
+        if wifi_available {
+            let network_manager = self.manager.clone();
+            let network_refresh_tx = signal_tx.clone();
+            let network_error_tx = signal_tx.clone();
+            let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
+            if let Err(spawn_error) = thread::Builder::new()
+                .name("innu-network-monitor".into())
+                .spawn(move || {
+                    let runtime = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build();
+                    match runtime {
+                        Ok(runtime) => {
+                            let result = runtime.block_on(async move {
+                                tokio::select! {
+                                    result = network_manager.monitor_network_changes(move || {
+                                        let _ = network_refresh_tx.send(BackendSignal::SnapshotRefresh);
+                                    }) => result,
+                                    _ = cancel_rx => Ok(()),
+                                }
+                            });
+                            if let Err(error) = result {
+                                let _ = network_error_tx.send(BackendSignal::MonitorFailed(
+                                    "Network",
+                                    error.to_string(),
+                                ));
+                            }
+                        }
+                        Err(error) => {
+                            let _ = network_error_tx
+                                .send(BackendSignal::MonitorFailed("Network", error.to_string()));
+                        }
+                    }
+                })
+            {
+                error!(?spawn_error, "failed to spawn network monitor thread");
+            } else {
+                self.monitor_cancellers.push(cancel_tx);
+            }
+        }
+
+        let device_manager = self.manager.clone();
+        let device_refresh_tx = signal_tx.clone();
+        let device_error_tx = signal_tx;
+        let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
+        if let Err(spawn_error) = thread::Builder::new()
+            .name("innu-device-monitor".into())
+            .spawn(move || {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build();
+                match runtime {
+                    Ok(runtime) => {
+                        let result = runtime.block_on(async move {
+                            tokio::select! {
+                                result = device_manager.monitor_device_changes(move || {
+                                    let _ = device_refresh_tx.send(BackendSignal::SnapshotRefresh);
+                                }) => result,
+                                _ = cancel_rx => Ok(()),
+                            }
+                        });
+                        if let Err(error) = result {
+                            let _ = device_error_tx
+                                .send(BackendSignal::MonitorFailed("Device", error.to_string()));
+                        }
+                    }
+                    Err(error) => {
+                        let _ = device_error_tx
+                            .send(BackendSignal::MonitorFailed("Device", error.to_string()));
+                    }
+                }
+            })
+        {
+            error!(?spawn_error, "failed to spawn device monitor thread");
+        } else {
+            self.monitor_cancellers.push(cancel_tx);
+        }
     }
 
     async fn handle(&mut self, command: WifiCommand) -> anyhow::Result<()> {
@@ -312,16 +427,10 @@ impl BackendWorker {
     }
 
     async fn snapshot(&self) -> anyhow::Result<AppSnapshot> {
-        let devices = self.manager.list_devices().await?;
-        let wifi_devices = devices
-            .into_iter()
-            .filter(|device| device.is_wireless())
-            .collect::<Vec<_>>();
+        let wifi_devices = self.manager.list_wireless_devices().await?;
         let primary_device_id = wifi_devices.first().map(|device| device.path.clone());
         let wifi_available = !wifi_devices.is_empty();
-        let radio_enabled = manager_bool_property(&self.connection, "WirelessEnabled")
-            .await
-            .unwrap_or(true);
+        let radio_enabled = self.manager.wifi_enabled().await.unwrap_or(true);
         let rfkill_blocked = !manager_bool_property(&self.connection, "WirelessHardwareEnabled")
             .await
             .unwrap_or(true);
@@ -347,6 +456,14 @@ impl BackendWorker {
             manager_running: true,
             transient_error: self.transient_error.clone(),
         })
+    }
+}
+
+impl Drop for BackendWorker {
+    fn drop(&mut self) {
+        for canceller in self.monitor_cancellers.drain(..) {
+            let _ = canceller.send(());
+        }
     }
 }
 
