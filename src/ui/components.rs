@@ -399,11 +399,7 @@ fn button_rich_text(
             let text = RichText::new(label)
                 .size(tokens.typography.body)
                 .color(color);
-            if strong {
-                text.strong()
-            } else {
-                text
-            }
+            if strong { text.strong() } else { text }
         }
         ActionVisual::Icon(icon) => icon_rich_text(tokens, layout, icon, color),
     }

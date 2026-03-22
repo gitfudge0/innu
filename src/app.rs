@@ -1,11 +1,11 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use eframe::egui::{
-    Align, Align2, CentralPanel, ComboBox, Context, Id, Layout, RichText, ScrollArea,
-    Ui, Vec2, ViewportCommand, Window,
-};
 use eframe::egui::scroll_area::ScrollBarVisibility;
+use eframe::egui::{
+    Align, Align2, CentralPanel, ComboBox, Context, Id, Layout, RichText, ScrollArea, Ui, Vec2,
+    ViewportCommand, Window,
+};
 use eframe::{App, CreationContext};
 
 use crate::backend::nm::{BackendController, WifiController};
@@ -603,11 +603,7 @@ impl WifiApp {
         ui.set_min_height(region_height);
 
         if self.refreshing_networks {
-            self.render_list_empty(
-                ui,
-                "Scanning...",
-                "Scanning for access points.",
-            );
+            self.render_list_empty(ui, "Scanning...", "Scanning for access points.");
             return;
         }
 
@@ -1261,7 +1257,12 @@ impl WifiApp {
                 ui.add_space(self.tokens.spacing.control_to_label_gap);
                 render_detail_row(ui, &self.tokens, "SIGNAL", &signal);
                 ui.add_space(self.tokens.spacing.control_to_label_gap);
-                render_detail_row(ui, &self.tokens, "QUALITY", signal_quality_label(network.signal));
+                render_detail_row(
+                    ui,
+                    &self.tokens,
+                    "QUALITY",
+                    signal_quality_label(network.signal),
+                );
                 ui.add_space(self.tokens.spacing.control_to_label_gap);
                 render_detail_row(ui, &self.tokens, "BAND", &network.band_summary);
                 ui.add_space(self.tokens.spacing.control_to_label_gap);
@@ -1471,11 +1472,7 @@ fn signal_quality_label(signal: Option<u8>) -> &'static str {
 }
 
 fn saved_profile_label(network: &AccessPointGroup) -> &'static str {
-    if network.known {
-        "Saved"
-    } else {
-        "Not saved"
-    }
+    if network.known { "Saved" } else { "Not saved" }
 }
 
 fn details_primary_action(network: &AccessPointGroup) -> Option<AppActionKind> {
