@@ -19,8 +19,8 @@ use crate::ui::components::{
     modal_shell, modal_title,
 };
 use crate::ui::theme::{
-    LayoutClass, ThemeChoice, ThemeTokens, apply_theme, layout_class_for_width, load_theme_prefs,
-    save_theme_prefs,
+    AppearanceOverrides, LayoutClass, ThemeChoice, ThemeTokens, apply_theme, install_fonts,
+    layout_class_for_width, load_appearance_overrides, load_theme_prefs, save_theme_prefs,
 };
 
 const APP_VERSION_LABEL: &str = concat!("v", env!("CARGO_PKG_VERSION"));
@@ -88,6 +88,7 @@ pub struct WifiApp {
     last_connect_attempt: Option<ConnectRequest>,
     quit_requested: bool,
     theme_choice: ThemeChoice,
+    appearance: AppearanceOverrides,
     tokens: ThemeTokens,
 }
 
@@ -98,9 +99,11 @@ impl WifiApp {
         tray: Option<TrayBridge>,
     ) -> Self {
         let theme_choice = load_theme_prefs();
+        let appearance = load_appearance_overrides();
         let initial_layout = layout_class_for_width(cc.egui_ctx.content_rect().width());
-        apply_theme(&cc.egui_ctx, theme_choice, initial_layout);
-        let tokens = theme_choice.tokens(initial_layout);
+        install_fonts(&cc.egui_ctx, &appearance);
+        apply_theme(&cc.egui_ctx, theme_choice, initial_layout, &appearance);
+        let tokens = theme_choice.tokens(initial_layout, &appearance);
 
         let controller: Arc<dyn WifiController> = controller;
         let _ = controller.send(WifiCommand::Refresh);
@@ -121,6 +124,7 @@ impl WifiApp {
             last_connect_attempt: None,
             quit_requested: false,
             theme_choice,
+            appearance,
             tokens,
         }
     }
@@ -321,8 +325,8 @@ impl WifiApp {
         update: impl FnOnce(&mut ThemeChoice),
     ) {
         update(&mut self.theme_choice);
-        self.tokens = self.theme_choice.tokens(layout);
-        apply_theme(ctx, self.theme_choice, layout);
+        self.tokens = self.theme_choice.tokens(layout, &self.appearance);
+        apply_theme(ctx, self.theme_choice, layout, &self.appearance);
         let _ = save_theme_prefs(self.theme_choice);
     }
 
@@ -1375,8 +1379,8 @@ impl App for WifiApp {
 
         let content_width = ctx.content_rect().width();
         let layout = layout_class_for_width(content_width);
-        self.tokens = self.theme_choice.tokens(layout);
-        apply_theme(ctx, self.theme_choice, layout);
+        self.tokens = self.theme_choice.tokens(layout, &self.appearance);
+        apply_theme(ctx, self.theme_choice, layout, &self.appearance);
 
         CentralPanel::default()
             .frame(components::app_frame(&self.tokens))

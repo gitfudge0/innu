@@ -1,6 +1,6 @@
 [package]
 name = "innu"
-version = "0.1.4"
+version = "0.2.0"
 edition = "2024"
 description = "A beautiful, minimal, and fast Wi-Fi manager for Linux built with Rust and egui."
 license = "MIT"

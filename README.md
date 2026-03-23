@@ -63,6 +63,43 @@ Launch Innu from a terminal:
 innu
 ```
 
+## Appearance
+
+Innu keeps the light/dark mode toggle in `~/.config/innu/theme.toml` and supports optional color/font overrides in `~/.config/innu/appearance.toml`.
+
+`appearance.toml` is partial: any missing key falls back to the built-in theme. Only colors and the main UI text font are configurable. Layout, spacing, icon symbols, labels, and behavior do not change.
+
+Example:
+
+```toml
+[fonts]
+ui = "/absolute/path/to/font.ttf"
+
+[light.colors]
+background = "#F5F3EE"
+surface = "#FFFDF8"
+border = "#1F1A17"
+text = "#171311"
+text_muted = "#5E5750"
+accent = "#B56A1E"
+success = "#2F6B45"
+warning = "#8A5A12"
+error = "#8C2F2F"
+
+[dark.colors]
+background = "#101010"
+surface = "#151515"
+border = "#D6D0C7"
+text = "#F2EEE7"
+text_muted = "#B1AAA1"
+accent = "#D0893C"
+success = "#6FA57E"
+warning = "#D2A45B"
+error = "#D07C7C"
+```
+
+Use 6-digit hex colors. Invalid colors or unreadable font paths are ignored and fall back to the defaults.
+
 ## CLI
 
 ```bash
