@@ -195,9 +195,10 @@ fn backend_thread(
             Ok(BackendSignal::MonitorFailed(kind, message)) => {
                 let error_message = format!("{kind} monitoring stopped: {message}");
                 let _ = event_tx.send(WifiEvent::ErrorRaised(error_message.clone()));
-                let _ = event_tx.send(WifiEvent::SnapshotUpdated(Box::new(
-                    unavailable_snapshot(true, Some(error_message)),
-                )));
+                let _ = event_tx.send(WifiEvent::SnapshotUpdated(Box::new(unavailable_snapshot(
+                    true,
+                    Some(error_message),
+                ))));
                 worker = None;
             }
             Err(RecvTimeoutError::Disconnected) => break,

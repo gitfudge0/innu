@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use directories::ProjectDirs;
 use eframe::egui::{
@@ -8,6 +8,7 @@ use eframe::egui::{
     TextStyle, Visuals,
 };
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BaseMode {
@@ -30,6 +31,79 @@ pub struct ThemeChoice {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThemePrefs {
     pub base: BaseMode,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct AppearanceOverrides {
+    light: SemanticPaletteOverride,
+    dark: SemanticPaletteOverride,
+    ui_font: Option<LoadedFont>,
+}
+
+#[derive(Debug, Clone)]
+struct LoadedFont {
+    name: String,
+    bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct AppearancePrefs {
+    #[serde(default)]
+    fonts: FontOverrides,
+    #[serde(default)]
+    light: ModeAppearancePrefs,
+    #[serde(default)]
+    dark: ModeAppearancePrefs,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct FontOverrides {
+    ui: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct ModeAppearancePrefs {
+    #[serde(default)]
+    colors: ColorOverrideInputs,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct ColorOverrideInputs {
+    background: Option<String>,
+    surface: Option<String>,
+    border: Option<String>,
+    text: Option<String>,
+    text_muted: Option<String>,
+    accent: Option<String>,
+    success: Option<String>,
+    warning: Option<String>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct SemanticPaletteOverride {
+    background: Option<Color32>,
+    surface: Option<Color32>,
+    border: Option<Color32>,
+    text: Option<Color32>,
+    text_muted: Option<Color32>,
+    accent: Option<Color32>,
+    success: Option<Color32>,
+    warning: Option<Color32>,
+    error: Option<Color32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SemanticPalette {
+    background: Color32,
+    surface: Color32,
+    border: Color32,
+    text: Color32,
+    text_muted: Color32,
+    accent: Color32,
+    success: Color32,
+    warning: Color32,
+    error: Color32,
 }
 
 #[derive(Debug, Clone)]
@@ -115,51 +189,11 @@ impl ThemeChoice {
         };
     }
 
-    pub fn tokens(self, layout: LayoutClass) -> ThemeTokens {
-        let colors = match self.base {
-            BaseMode::Light => ColorTokens {
-                window_bg: rgb(0xF5F3EE),
-                panel_bg: rgb(0xFFFDF8),
-                elevated_panel_bg: rgb(0xF1EEE7),
-                border: rgb(0x1F1A17),
-                muted_border: rgb(0x8E877F),
-                text_primary: rgb(0x171311),
-                text_secondary: rgb(0x5E5750),
-                disabled_text: rgb(0x8A837C),
-                accent: rgb(0xB56A1E),
-                accent_text: rgb(0xFFF8F0),
-                success: rgb(0x2F6B45),
-                warning: rgb(0x8A5A12),
-                error: rgb(0x8C2F2F),
-                input_bg: rgb(0xFFFDF8),
-                input_border: rgb(0x1F1A17),
-                hover_bg: rgb(0xEFEAE2),
-                pressed_bg: rgb(0xE4DED6),
-                focus_border: rgb(0xB56A1E),
-                selected_fill: rgb(0xF3E1CF),
-            },
-            BaseMode::Dark => ColorTokens {
-                window_bg: rgb(0x101010),
-                panel_bg: rgb(0x151515),
-                elevated_panel_bg: rgb(0x1A1A1A),
-                border: rgb(0xD6D0C7),
-                muted_border: rgb(0x6B675F),
-                text_primary: rgb(0xF2EEE7),
-                text_secondary: rgb(0xB1AAA1),
-                disabled_text: rgb(0x7A746B),
-                accent: rgb(0xD0893C),
-                accent_text: rgb(0x15110D),
-                success: rgb(0x6FA57E),
-                warning: rgb(0xD2A45B),
-                error: rgb(0xD07C7C),
-                input_bg: rgb(0x151515),
-                input_border: rgb(0xD6D0C7),
-                hover_bg: rgb(0x1C1C1C),
-                pressed_bg: rgb(0x232323),
-                focus_border: rgb(0xD0893C),
-                selected_fill: rgb(0x261C12),
-            },
-        };
+    pub fn tokens(self, layout: LayoutClass, appearance: &AppearanceOverrides) -> ThemeTokens {
+        let palette = appearance
+            .palette_for(self.base)
+            .apply(base_semantic_palette(self.base));
+        let colors = derive_color_tokens(self.base, palette);
 
         ThemeTokens {
             colors,
@@ -173,7 +207,52 @@ impl ThemeChoice {
     }
 }
 
-pub fn install_fonts(ctx: &Context) {
+impl AppearanceOverrides {
+    fn palette_for(&self, mode: BaseMode) -> &SemanticPaletteOverride {
+        match mode {
+            BaseMode::Light => &self.light,
+            BaseMode::Dark => &self.dark,
+        }
+    }
+}
+
+impl SemanticPaletteOverride {
+    fn apply(&self, base: SemanticPalette) -> SemanticPalette {
+        SemanticPalette {
+            background: self.background.unwrap_or(base.background),
+            surface: self.surface.unwrap_or(base.surface),
+            border: self.border.unwrap_or(base.border),
+            text: self.text.unwrap_or(base.text),
+            text_muted: self.text_muted.unwrap_or(base.text_muted),
+            accent: self.accent.unwrap_or(base.accent),
+            success: self.success.unwrap_or(base.success),
+            warning: self.warning.unwrap_or(base.warning),
+            error: self.error.unwrap_or(base.error),
+        }
+    }
+}
+
+pub fn load_appearance_overrides() -> AppearanceOverrides {
+    let Ok(path) = appearance_path() else {
+        return AppearanceOverrides::default();
+    };
+    let Ok(raw) = fs::read_to_string(&path) else {
+        return AppearanceOverrides::default();
+    };
+
+    match parse_appearance_overrides(&raw) {
+        Ok(overrides) => overrides,
+        Err(error) => {
+            warn!(
+                path = %path.display(),
+                "failed to parse appearance overrides: {error}"
+            );
+            AppearanceOverrides::default()
+        }
+    }
+}
+
+pub fn install_fonts(ctx: &Context, appearance: &AppearanceOverrides) {
     let mut fonts = FontDefinitions::default();
     fonts.font_data.insert(
         "ibm_plex_mono".into(),
@@ -187,16 +266,26 @@ pub fn install_fonts(ctx: &Context) {
         .into(),
     );
 
+    let primary_font = if let Some(font) = &appearance.ui_font {
+        fonts.font_data.insert(
+            font.name.clone().into(),
+            FontData::from_owned(font.bytes.clone()).into(),
+        );
+        font.name.as_str()
+    } else {
+        "ibm_plex_mono"
+    };
+
     fonts
         .families
         .entry(FontFamily::Monospace)
         .or_default()
-        .insert(0, "ibm_plex_mono".into());
+        .insert(0, primary_font.into());
     fonts
         .families
         .entry(FontFamily::Proportional)
         .or_default()
-        .insert(0, "ibm_plex_mono".into());
+        .insert(0, primary_font.into());
     fonts
         .families
         .entry(FontFamily::Name("material_symbols_sharp".into()))
@@ -206,10 +295,13 @@ pub fn install_fonts(ctx: &Context) {
     ctx.set_fonts(fonts);
 }
 
-pub fn apply_theme(ctx: &Context, theme: ThemeChoice, layout: LayoutClass) {
-    install_fonts(ctx);
-
-    let tokens = theme.tokens(layout);
+pub fn apply_theme(
+    ctx: &Context,
+    theme: ThemeChoice,
+    layout: LayoutClass,
+    appearance: &AppearanceOverrides,
+) {
+    let tokens = theme.tokens(layout, appearance);
     let mut style: Style = (*ctx.style()).clone();
     style.spacing.item_spacing = egui::vec2(tokens.spacing.tight, tokens.spacing.tight);
     style.spacing.button_padding = egui::vec2(tokens.spacing.control, tokens.spacing.tight);
@@ -314,6 +406,173 @@ fn prefs_path() -> anyhow::Result<PathBuf> {
     let project_dirs = ProjectDirs::from("dev", "gitfudge", "innu")
         .ok_or_else(|| anyhow::anyhow!("failed to resolve XDG configuration directory"))?;
     Ok(project_dirs.config_dir().join("theme.toml"))
+}
+
+fn appearance_path() -> anyhow::Result<PathBuf> {
+    let project_dirs = ProjectDirs::from("dev", "gitfudge", "innu")
+        .ok_or_else(|| anyhow::anyhow!("failed to resolve XDG configuration directory"))?;
+    Ok(project_dirs.config_dir().join("appearance.toml"))
+}
+
+fn parse_appearance_overrides(raw: &str) -> anyhow::Result<AppearanceOverrides> {
+    let prefs = toml::from_str::<AppearancePrefs>(raw)?;
+    Ok(AppearanceOverrides {
+        light: parse_color_overrides(&prefs.light.colors, "light.colors"),
+        dark: parse_color_overrides(&prefs.dark.colors, "dark.colors"),
+        ui_font: prefs.fonts.ui.and_then(|path| load_font_override(&path)),
+    })
+}
+
+fn parse_color_overrides(input: &ColorOverrideInputs, scope: &str) -> SemanticPaletteOverride {
+    SemanticPaletteOverride {
+        background: parse_optional_color(
+            input.background.as_deref(),
+            &format!("{scope}.background"),
+        ),
+        surface: parse_optional_color(input.surface.as_deref(), &format!("{scope}.surface")),
+        border: parse_optional_color(input.border.as_deref(), &format!("{scope}.border")),
+        text: parse_optional_color(input.text.as_deref(), &format!("{scope}.text")),
+        text_muted: parse_optional_color(
+            input.text_muted.as_deref(),
+            &format!("{scope}.text_muted"),
+        ),
+        accent: parse_optional_color(input.accent.as_deref(), &format!("{scope}.accent")),
+        success: parse_optional_color(input.success.as_deref(), &format!("{scope}.success")),
+        warning: parse_optional_color(input.warning.as_deref(), &format!("{scope}.warning")),
+        error: parse_optional_color(input.error.as_deref(), &format!("{scope}.error")),
+    }
+}
+
+fn parse_optional_color(raw: Option<&str>, field_name: &str) -> Option<Color32> {
+    let raw = raw?;
+    match parse_hex_color(raw) {
+        Ok(color) => Some(color),
+        Err(error) => {
+            warn!("ignoring invalid appearance color for {field_name}: {error}");
+            None
+        }
+    }
+}
+
+fn parse_hex_color(raw: &str) -> anyhow::Result<Color32> {
+    let value = raw.trim().trim_start_matches('#');
+    anyhow::ensure!(
+        value.len() == 6,
+        "expected a 6-digit hex color, got `{raw}`"
+    );
+    let color = u32::from_str_radix(value, 16)?;
+    Ok(rgb(color))
+}
+
+fn load_font_override(path: &Path) -> Option<LoadedFont> {
+    match fs::read(path) {
+        Ok(bytes) => Some(LoadedFont {
+            name: format!(
+                "user_ui_font_{}",
+                path.file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .unwrap_or("custom")
+            ),
+            bytes,
+        }),
+        Err(error) => {
+            warn!(
+                path = %path.display(),
+                "ignoring unreadable appearance font override: {error}"
+            );
+            None
+        }
+    }
+}
+
+fn base_semantic_palette(mode: BaseMode) -> SemanticPalette {
+    match mode {
+        BaseMode::Light => SemanticPalette {
+            background: rgb(0xF5F3EE),
+            surface: rgb(0xFFFDF8),
+            border: rgb(0x1F1A17),
+            text: rgb(0x171311),
+            text_muted: rgb(0x5E5750),
+            accent: rgb(0xB56A1E),
+            success: rgb(0x2F6B45),
+            warning: rgb(0x8A5A12),
+            error: rgb(0x8C2F2F),
+        },
+        BaseMode::Dark => SemanticPalette {
+            background: rgb(0x101010),
+            surface: rgb(0x151515),
+            border: rgb(0xD6D0C7),
+            text: rgb(0xF2EEE7),
+            text_muted: rgb(0xB1AAA1),
+            accent: rgb(0xD0893C),
+            success: rgb(0x6FA57E),
+            warning: rgb(0xD2A45B),
+            error: rgb(0xD07C7C),
+        },
+    }
+}
+
+fn derive_color_tokens(mode: BaseMode, palette: SemanticPalette) -> ColorTokens {
+    let emphasis = match mode {
+        BaseMode::Light => 0.08,
+        BaseMode::Dark => 0.06,
+    };
+    let pressed = match mode {
+        BaseMode::Light => 0.14,
+        BaseMode::Dark => 0.12,
+    };
+    let selected = match mode {
+        BaseMode::Light => 0.22,
+        BaseMode::Dark => 0.3,
+    };
+
+    ColorTokens {
+        window_bg: palette.background,
+        panel_bg: palette.surface,
+        elevated_panel_bg: blend(palette.surface, palette.text, 0.04),
+        border: palette.border,
+        muted_border: blend(palette.border, palette.background, 0.45),
+        text_primary: palette.text,
+        text_secondary: palette.text_muted,
+        disabled_text: blend(palette.text_muted, palette.background, 0.35),
+        accent: palette.accent,
+        accent_text: contrast_text(palette.accent),
+        success: palette.success,
+        warning: palette.warning,
+        error: palette.error,
+        input_bg: palette.surface,
+        input_border: palette.border,
+        hover_bg: blend(palette.surface, palette.text, emphasis),
+        pressed_bg: blend(palette.surface, palette.text, pressed),
+        focus_border: palette.accent,
+        selected_fill: blend(palette.accent, palette.background, selected),
+    }
+}
+
+fn contrast_text(color: Color32) -> Color32 {
+    if perceived_luminance(color) > 0.6 {
+        rgb(0x15110D)
+    } else {
+        rgb(0xFFF8F0)
+    }
+}
+
+fn perceived_luminance(color: Color32) -> f32 {
+    (0.2126 * f32::from(color.r()) + 0.7152 * f32::from(color.g()) + 0.0722 * f32::from(color.b()))
+        / 255.0
+}
+
+fn blend(from: Color32, to: Color32, ratio: f32) -> Color32 {
+    let ratio = ratio.clamp(0.0, 1.0);
+    let mix = |start: u8, end: u8| -> u8 {
+        (f32::from(start) + (f32::from(end) - f32::from(start)) * ratio).round() as u8
+    };
+
+    Color32::from_rgb(
+        mix(from.r(), to.r()),
+        mix(from.g(), to.g()),
+        mix(from.b(), to.b()),
+    )
 }
 
 fn rgb(value: u32) -> Color32 {
@@ -421,5 +680,147 @@ mod tests {
         assert_eq!(layout_class_for_width(300.0), LayoutClass::Compact);
         assert_eq!(layout_class_for_width(400.0), LayoutClass::Narrow);
         assert_eq!(layout_class_for_width(700.0), LayoutClass::Standard);
+    }
+
+    #[test]
+    fn merges_partial_mode_overrides_into_default_palette() {
+        let overrides = parse_appearance_overrides(
+            r##"
+            [light.colors]
+            accent = "#112233"
+
+            [dark.colors]
+            text = "#abcdef"
+            "##,
+        )
+        .unwrap();
+
+        let light = ThemeChoice {
+            base: BaseMode::Light,
+        }
+        .tokens(LayoutClass::Standard, &overrides);
+        let dark = ThemeChoice {
+            base: BaseMode::Dark,
+        }
+        .tokens(LayoutClass::Standard, &overrides);
+
+        assert_eq!(light.colors.accent, rgb(0x112233));
+        assert_eq!(
+            light.colors.text_primary,
+            base_semantic_palette(BaseMode::Light).text
+        );
+        assert_eq!(dark.colors.text_primary, rgb(0xABCDEF));
+        assert_eq!(
+            dark.colors.accent,
+            base_semantic_palette(BaseMode::Dark).accent
+        );
+    }
+
+    #[test]
+    fn ignores_invalid_hex_colors() {
+        let overrides = parse_appearance_overrides(
+            r##"
+            [light.colors]
+            accent = "#12"
+            "##,
+        )
+        .unwrap();
+
+        let light = ThemeChoice {
+            base: BaseMode::Light,
+        }
+        .tokens(LayoutClass::Standard, &overrides);
+
+        assert_eq!(
+            light.colors.accent,
+            base_semantic_palette(BaseMode::Light).accent
+        );
+    }
+
+    #[test]
+    fn ignores_unreadable_font_path() {
+        let overrides = parse_appearance_overrides(
+            r##"
+            [fonts]
+            ui = "/definitely/missing/font.ttf"
+            "##,
+        )
+        .unwrap();
+
+        assert!(overrides.ui_font.is_none());
+    }
+
+    #[test]
+    fn keeps_mode_specific_overrides_separate() {
+        let overrides = parse_appearance_overrides(
+            r##"
+            [light.colors]
+            background = "#ffffff"
+
+            [dark.colors]
+            background = "#000000"
+            "##,
+        )
+        .unwrap();
+
+        let light = ThemeChoice {
+            base: BaseMode::Light,
+        }
+        .tokens(LayoutClass::Standard, &overrides);
+        let dark = ThemeChoice {
+            base: BaseMode::Dark,
+        }
+        .tokens(LayoutClass::Standard, &overrides);
+
+        assert_eq!(light.colors.window_bg, rgb(0xFFFFFF));
+        assert_eq!(dark.colors.window_bg, rgb(0x000000));
+    }
+
+    #[test]
+    fn apply_theme_keeps_existing_custom_font_installation() {
+        let ctx = Context::default();
+        let appearance = AppearanceOverrides {
+            light: SemanticPaletteOverride::default(),
+            dark: SemanticPaletteOverride::default(),
+            ui_font: Some(LoadedFont {
+                name: "custom_ui_font".into(),
+                bytes: include_bytes!("../../assets/fonts/IBMPlexMono-Regular.ttf").to_vec(),
+            }),
+        };
+
+        install_fonts(&ctx, &appearance);
+        let _ = ctx.run(egui::RawInput::default(), |_| {});
+
+        for _ in 0..3 {
+            apply_theme(
+                &ctx,
+                ThemeChoice {
+                    base: BaseMode::Dark,
+                },
+                LayoutClass::Standard,
+                &appearance,
+            );
+            let _ = ctx.run(egui::RawInput::default(), |_| {});
+        }
+
+        ctx.fonts_mut(|fonts| {
+            let definitions = fonts.definitions();
+            assert_eq!(
+                definitions
+                    .families
+                    .get(&FontFamily::Monospace)
+                    .unwrap()
+                    .first(),
+                Some(&"custom_ui_font".to_owned())
+            );
+            assert_eq!(
+                definitions
+                    .families
+                    .get(&FontFamily::Proportional)
+                    .unwrap()
+                    .first(),
+                Some(&"custom_ui_font".to_owned())
+            );
+        });
     }
 }
